@@ -1,0 +1,229 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>Mi Drive y Excel</title>
+<style>
+:root{--bg:#f3f6f8;--card:#fff;--ink:#14212b;--mut:#5d6f7c;--line:#d5dee5;--acc:#0f6b5c;--accink:#fff;--hl:#fff3b8;--err:#b3261e}
+@media (prefers-color-scheme:dark){:root{--bg:#10171c;--card:#18222a;--ink:#e6edf1;--mut:#90a3b0;--line:#2c3b46;--acc:#3fb59f;--accink:#06201b;--hl:#5a4d10;--err:#ff8a80}}
+*{box-sizing:border-box}
+html,body{margin:0}
+body{background:var(--bg);color:var(--ink);font:16px/1.4 system-ui,-apple-system,"Segoe UI",Roboto,sans-serif;padding:env(safe-area-inset-top) 0 env(safe-area-inset-bottom)}
+header{position:sticky;top:0;z-index:5;background:var(--card);border-bottom:1px solid var(--line);padding:10px 14px;display:flex;gap:8px;align-items:center}
+header h1{font-size:17px;margin:0;flex:1}
+button,select,input{font:inherit;color:inherit}
+button{background:var(--acc);color:var(--accink);border:0;border-radius:8px;padding:9px 14px;font-weight:600}
+button.sec{background:transparent;color:var(--ink);border:1px solid var(--line)}
+button:disabled{opacity:.5}
+button:focus-visible,input:focus-visible,select:focus-visible,td:focus-visible{outline:2px solid var(--acc);outline-offset:1px}
+main{padding:14px;max-width:900px;margin:0 auto}
+.row{display:flex;gap:8px;flex-wrap:wrap;margin-bottom:12px;align-items:center}
+.row input[type=search],.row select{flex:1;min-width:140px;background:var(--card);border:1px solid var(--line);border-radius:8px;padding:9px 10px}
+.drop{background:var(--card);border:2px dashed var(--line);border-radius:12px;padding:16px;text-align:center;margin-bottom:12px}
+.drop label{display:block;margin-top:8px;color:var(--mut);font-size:14px}
+.bar{display:flex;gap:10px;align-items:center;margin-bottom:12px;color:var(--mut);font-size:14px}
+.bar span{flex:1;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.file{display:flex;gap:10px;align-items:center;background:var(--card);border:1px solid var(--line);border-radius:10px;padding:11px 12px;margin-bottom:8px;width:100%;text-align:left;color:var(--ink);font-weight:400}
+.file b{flex:1;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;font-weight:600}
+.file small{color:var(--mut)}
+.file.dir{border-left:4px solid var(--acc)}
+.tag{font-size:12px;border:1px solid var(--line);border-radius:6px;padding:2px 6px;color:var(--mut)}
+#msg{position:fixed;left:12px;right:12px;bottom:calc(12px + env(safe-area-inset-bottom));background:var(--ink);color:var(--bg);padding:11px 14px;border-radius:10px;display:none;z-index:9}
+.grid{overflow:auto;max-height:68vh;border:1px solid var(--line);border-radius:10px;background:var(--card)}
+table{border-collapse:collapse;min-width:100%}
+th,td{border:1px solid var(--line);padding:6px 8px;min-width:90px;height:34px;white-space:pre-wrap}
+th{background:var(--bg);color:var(--mut);font-weight:500;position:sticky;top:0;font-size:13px}
+th.rn{left:0;z-index:2;min-width:38px}
+td.rn{background:var(--bg);color:var(--mut);position:sticky;left:0;font-size:13px;min-width:38px}
+td.ch{background:var(--hl)}
+.hide{display:none}
+#login{text-align:center;padding:60px 20px}
+#login p{color:var(--mut);max-width:34ch;margin:8px auto 20px}
+</style>
+</head>
+<body>
+<header>
+  <button id="back" class="sec hide">Volver</button>
+  <h1 id="title">Mi Drive y Excel</h1>
+  <button id="out" class="sec hide">Salir</button>
+</header>
+<main>
+  <section id="login">
+    <h2>Tus archivos en un solo lugar</h2>
+    <p>Subí archivos a Google Drive y editá tus hojas de cálculo desde el celular.</p>
+    <button id="in">Iniciar sesión con Google</button>
+  </section>
+
+  <section id="list" class="hide">
+    <div class="drop">
+      <button id="pick">Subir archivos</button>
+      <input id="fi" type="file" multiple class="hide">
+      <label><input id="conv" type="checkbox" checked> Convertir Excel y CSV a Hoja de Google (para editarlos)</label>
+    </div>
+    <div class="row">
+      <input id="q" type="search" placeholder="Buscar en todo el Drive">
+      <select id="flt"><option value="sheets">Carpetas, hojas y Excel</option><option value="all">Todos los archivos</option><option value="shared">Compartidos conmigo</option></select>
+    </div>
+    <div class="bar"><button id="up" class="sec hide">‹ Atrás</button><span id="crumb"></span></div>
+    <div id="files"></div>
+  </section>
+
+  <section id="editor" class="hide">
+    <div class="row">
+      <select id="tabs"></select>
+      <button id="save" disabled>Guardar cambios</button>
+      <button id="dl" class="sec">Descargar .xlsx</button>
+    </div>
+    <div class="grid"><table id="tbl"></table></div>
+  </section>
+</main>
+<div id="msg" role="status"></div>
+
+<script src="https://accounts.google.com/gsi/client" async defer></script>
+<script>
+const CLIENT_ID = "60577832511-k539gv6ad9vj7j53tgjr8ep33gi69um8.apps.googleusercontent.com";
+const SCOPE = "https://www.googleapis.com/auth/drive";
+const SHEET = "application/vnd.google-apps.spreadsheet";
+const FOLDER = "application/vnd.google-apps.folder";
+const XLSX = "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet";
+const XLS = "application/vnd.ms-excel";
+
+let token = null, tc = null, cur = null, vals = [], shown = [], dirty = {};
+let path = [{ id: "root", name: "Mi unidad" }];
+const $ = id => document.getElementById(id);
+const show = s => { ["login","list","editor"].forEach(x => $(x).classList.toggle("hide", x !== s));
+  $("back").classList.toggle("hide", s !== "editor"); $("out").classList.toggle("hide", s === "login");
+  $("title").textContent = s === "editor" ? cur.name : "Mi Drive y Excel"; };
+function msg(t, ms = 2800){ const m = $("msg"); m.textContent = t; m.style.display = "block"; clearTimeout(msg.t); msg.t = setTimeout(() => m.style.display = "none", ms); }
+
+async function api(url, opt = {}){
+  const r = await fetch(url, { ...opt, headers: { Authorization: "Bearer " + token, ...(opt.headers || {}) } });
+  if (r.status === 401){ token = null; show("login"); throw new Error("Sesión vencida. Iniciá sesión de nuevo."); }
+  if (!r.ok){ let e = await r.text(); try { e = JSON.parse(e).error.message } catch(_){} throw new Error(e); }
+  return opt.raw ? r : r.json();
+}
+
+function init(){
+  if (!window.google || !google.accounts){ return setTimeout(init, 300); }
+  tc = google.accounts.oauth2.initTokenClient({ client_id: CLIENT_ID, scope: SCOPE,
+    callback: r => { if (r.access_token){ token = r.access_token; show("list"); load(); } else msg("No se pudo iniciar sesión."); } });
+}
+$("in").onclick = () => tc ? tc.requestAccessToken() : msg("Cargando Google, probá de nuevo.");
+$("out").onclick = () => { if (token) google.accounts.oauth2.revoke(token); token = null; path = [{ id: "root", name: "Mi unidad" }]; show("login"); };
+$("back").onclick = () => { if (Object.keys(dirty).length && !confirm("Tenés cambios sin guardar. ¿Salir igual?")) return; show("list"); load(); };
+$("up").onclick = () => { if (path.length > 1){ path.pop(); load(); } };
+
+async function load(){
+  const name = $("q").value.replace(/['\\]/g, ""), mode = $("flt").value, here = path[path.length - 1];
+  let q = "trashed=false";
+  if (mode === "shared") q += " and sharedWithMe=true";
+  else if (!name) q += ` and '${here.id}' in parents`;
+  if (mode === "sheets") q += ` and (mimeType='${FOLDER}' or mimeType='${SHEET}' or mimeType='${XLSX}' or mimeType='${XLS}')`;
+  if (name) q += ` and name contains '${name}'`;
+  const browsing = mode !== "shared" && !name;
+  $("crumb").textContent = browsing ? path.map(p => p.name).join(" / ") : (name ? "Resultados de la búsqueda" : "Compartidos conmigo");
+  $("up").classList.toggle("hide", !(browsing && path.length > 1));
+  try {
+    const d = await api("https://www.googleapis.com/drive/v3/files?pageSize=100&orderBy=folder,modifiedTime desc&fields=files(id,name,mimeType,modifiedTime)&q=" + encodeURIComponent(q));
+    const box = $("files"); box.textContent = "";
+    if (!d.files.length){ box.textContent = "No hay nada acá. Subí un archivo con el botón de arriba."; return; }
+    d.files.forEach(f => {
+      const dir = f.mimeType === FOLDER;
+      const b = document.createElement("button"); b.className = "file" + (dir ? " dir" : "");
+      const kind = dir ? "Carpeta" : f.mimeType === SHEET ? "Hoja" : f.mimeType === XLSX || f.mimeType === XLS ? "Excel" : "Archivo";
+      b.innerHTML = "<b></b><span class=tag>" + kind + "</span><small>" + (dir ? "" : new Date(f.modifiedTime).toLocaleDateString()) + "</small>";
+      b.firstChild.textContent = f.name;
+      b.onclick = () => { if (dir){ if (mode === "shared" || name){ path = [{ id: "root", name: "Mi unidad" }]; $("q").value = ""; $("flt").value = "sheets"; } path.push({ id: f.id, name: f.name }); load(); } else openFile(f); };
+      box.appendChild(b);
+    });
+  } catch(e){ msg(e.message, 5000); }
+}
+$("q").oninput = () => { clearTimeout(load.t); load.t = setTimeout(load, 350); };
+$("flt").onchange = load;
+
+$("pick").onclick = () => $("fi").click();
+$("fi").onchange = async e => {
+  for (const f of e.target.files){
+    msg("Subiendo " + f.name + "…", 60000);
+    try {
+      const meta = { name: f.name, parents: [path[path.length - 1].id] };
+      const conv = $("conv").checked && (f.type === XLSX || f.type === "text/csv" || f.type === XLS);
+      if (conv) meta.mimeType = SHEET;
+      const fd = new FormData();
+      fd.append("metadata", new Blob([JSON.stringify(meta)], { type: "application/json" }));
+      fd.append("file", f);
+      await api("https://www.googleapis.com/upload/drive/v3/files?uploadType=multipart&fields=id", { method: "POST", body: fd });
+      msg("Subido: " + f.name);
+    } catch(err){ msg("Error al subir " + f.name + ": " + err.message, 6000); }
+  }
+  e.target.value = ""; load();
+};
+
+async function openFile(f){
+  try {
+    if (f.mimeType !== SHEET){
+      if (f.mimeType !== XLSX && f.mimeType !== XLS) return window.open("https://drive.google.com/file/d/" + f.id + "/view", "_blank");
+      if (!confirm("Para editarlo se crea una copia como Hoja de Google. El Excel original no se toca. ¿Continuar?")) return;
+      msg("Convirtiendo…", 60000);
+      const nf = await api("https://www.googleapis.com/drive/v3/files/" + f.id + "/copy?fields=id,name,mimeType", { method: "POST",
+        headers: { "Content-Type": "application/json" }, body: JSON.stringify({ mimeType: SHEET, name: f.name.replace(/\.xlsx?$/i, "") }) });
+      f = nf;
+    }
+    cur = f; dirty = {};
+    const s = await api("https://sheets.googleapis.com/v4/spreadsheets/" + f.id + "?fields=sheets.properties.title");
+    $("tabs").innerHTML = "";
+    s.sheets.forEach(x => { const o = document.createElement("option"); o.textContent = x.properties.title; $("tabs").appendChild(o); });
+    show("editor"); await loadSheet();
+  } catch(e){ msg(e.message, 6000); }
+}
+
+const col = n => { let s = ""; n++; while (n > 0){ const m = (n - 1) % 26; s = String.fromCharCode(65 + m) + s; n = Math.floor((n - 1) / 26); } return s; };
+async function loadSheet(){
+  dirty = {}; $("save").disabled = true;
+  const base = "https://sheets.googleapis.com/v4/spreadsheets/" + cur.id + "/values/" + encodeURIComponent($("tabs").value);
+  const [f, v] = await Promise.all([api(base + "?valueRenderOption=FORMULA"), api(base + "?valueRenderOption=FORMATTED_VALUE")]);
+  vals = f.values || []; shown = v.values || [];
+  const R = Math.max(vals.length, shown.length) + 5;
+  const C = Math.max(...vals.map(r => r.length), ...shown.map(r => r.length), 1) + 2;
+  const tb = $("tbl"); tb.textContent = "";
+  const h = tb.insertRow(); h.insertCell().outerHTML = "<th class=rn></th>";
+  for (let c = 0; c < C; c++) h.insertCell().outerHTML = "<th>" + col(c) + "</th>";
+  for (let r = 0; r < R; r++){
+    const tr = tb.insertRow(); tr.insertCell().outerHTML = "<td class=rn>" + (r + 1) + "</td>";
+    for (let c = 0; c < C; c++){
+      const td = tr.insertCell(), key = r + "," + c; td.contentEditable = "true";
+      const disp = () => (shown[r] && shown[r][c] != null) ? shown[r][c] : "";
+      const raw = () => (vals[r] && vals[r][c] != null) ? vals[r][c] : "";
+      td.textContent = disp();
+      td.onfocus = () => { if (!(key in dirty)) td.textContent = raw(); };
+      td.onblur = () => { if (!(key in dirty)) td.textContent = disp(); };
+      td.oninput = () => { dirty[key] = td.textContent; td.classList.add("ch"); $("save").disabled = false; };
+    }
+  }
+}
+$("tabs").onchange = () => { if (Object.keys(dirty).length && !confirm("Hay cambios sin guardar. ¿Cambiar de pestaña igual?")) return; loadSheet().catch(e => msg(e.message)); };
+
+$("save").onclick = async () => {
+  const t = $("tabs").value, data = Object.entries(dirty).map(([k, v]) => {
+    const [r, c] = k.split(",").map(Number); return { range: "'" + t.replace(/'/g, "''") + "'!" + col(c) + (r + 1), values: [[v]] }; });
+  $("save").disabled = true; msg("Guardando…", 30000);
+  try {
+    await api("https://sheets.googleapis.com/v4/spreadsheets/" + cur.id + "/values:batchUpdate", { method: "POST",
+      headers: { "Content-Type": "application/json" }, body: JSON.stringify({ valueInputOption: "USER_ENTERED", data }) });
+    await loadSheet(); msg("Cambios guardados");
+  } catch(e){ $("save").disabled = false; msg("No se pudo guardar: " + e.message, 6000); }
+};
+
+$("dl").onclick = async () => {
+  msg("Preparando descarga…", 30000);
+  try {
+    const r = await api("https://www.googleapis.com/drive/v3/files/" + cur.id + "/export?mimeType=" + encodeURIComponent(XLSX), { raw: true });
+    const a = document.createElement("a"); a.href = URL.createObjectURL(await r.blob()); a.download = cur.name.replace(/\.xlsx?$/i, "") + ".xlsx"; a.click(); msg("Descargado");
+  } catch(e){ msg(e.message, 6000); }
+};
+window.addEventListener("beforeunload", e => { if (Object.keys(dirty).length){ e.preventDefault(); e.returnValue = ""; } });
+init();
+</script>
+</body>
+</html>
